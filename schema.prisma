@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  phone        String   @unique
+  email        String?  @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  appointments      Appointment[]
+  emergencyRequests EmergencyRequest[]
+  carePlan          CarePlanSubscription?
+  vitals            VitalsLog[]
+  prescriptions     Prescription[]
+  messagesSent      Message[]              @relation("UserMessages")
+}
+
+model Hospital {
+  id           String   @id @default(uuid())
+  name         String
+  area         String
+  address      String
+  phone        String
+  lat          Float
+  lng          Float
+  specialties  String[]
+  insurers     String[]
+  beds         Int
+  established  Int
+  rating       Float
+
+  doctors           Doctor[]
+  appointments      Appointment[]
+  ambulanceTrips    AmbulanceTrip[]
+  bedStatus         HospitalBedStatus?
+}
+model HospitalBedStatus {
+  id            String   @id @default(uuid())
+  hospital      Hospital @relation(fields: [hospitalId], references: [id])
+  hospitalId    String   @unique
+  bedsAvailable Int
+  icuAvailable  Int
+  waitMinutes   Int
+  doctorOnDuty  Boolean
+  ctAvailable   Boolean
+  isLiveFeed    Boolean  @default(false) // false = demo/simulated figures
+  updatedAt     DateTime @updatedAt
+}
+
+model Doctor {
+  id         String   @id @default(uuid())
+  hospital   Hospital @relation(fields: [hospitalId], references: [id])
+  hospitalId String
+  name       String
+  specialty  String
+  expYears   Int
+  rating     Float
+  fee        Int
+  languages  String[]
+
+  slots        DoctorSlot[]
+  appointments Appointment[]
+  messages     Message[]
+  carePlans    CarePlanSubscription[]
+  prescriptions Prescription[]
+}
+
+model DoctorSlot {
+  id         String   @id @default(uuid())
+  doctor     Doctor   @relation(fields: [doctorId], references: [id])
+  doctorId   String
+  startTime  DateTime
+  endTime    DateTime
+  isBooked   Boolean  @default(false)
+
+  appointment Appointment?
+}
+
+model CauseCategory {
+  id        String  @id @default(uuid())
+  slug      String  @unique // e.g. "knee-pain"
+  label     String            // e.g. "Knee / Joint pain"
+  specialty String            // maps to Doctor.specialty / Hospital.specialties
+  icon      String            // icon key the frontend maps to a lucide icon
+  sortOrder Int      @default(0)
+
+  appointments Appointment[]
+}
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  user            User              @relation(fields: [userId], references: [id])
+  userId          String
+  hospital        Hospital          @relation(fields: [hospitalId], references: [id])
+  hospitalId      String
+  doctor          Doctor            @relation(fields: [doctorId], references: [id])
+  doctorId        String
+  slot            DoctorSlot        @relation(fields: [slotId], references: [id])
+  slotId          String            @unique
+  causeCategory   CauseCategory?    @relation(fields: [causeCategoryId], references: [id])
+  causeCategoryId String?
+  reasonText      String?
+  patientName     String
+  patientPhone    String
+  status          AppointmentStatus @default(REQUESTED)
+  depositAmount   Int               @default(150)
+  createdAt       DateTime          @default(now())
+
+  videoConsult VideoConsult?
+}
+
+
+model EmergencyRequest {
+  id                String   @id @default(uuid())
+  user              User?    @relation(fields: [userId], references: [id])
+  userId            String?
+  symptomText       String
+  detectedSpecialty String
+  isCritical        Boolean
+  userLat           Float?
+  userLng           Float?
+  createdAt         DateTime @default(now())
+
+  ambulanceTrips AmbulanceTrip[]
+}
+
+enum TripStatus {
+  DISPATCHED
+  ENROUTE
+  ARRIVED
+  CANCELLED
+}
+
+enum TripSource {
+  SIMULATED
+  DEVICE
+}
+
+model AmbulanceTrip {
+  id                  String            @id @default(uuid())
+  emergencyRequest    EmergencyRequest? @relation(fields: [emergencyRequestId], references: [id])
+  emergencyRequestId  String?
+  hospital            Hospital          @relation(fields: [hospitalId], references: [id])
+  hospitalId          String
+  status              TripStatus        @default(DISPATCHED)
+  source              TripSource        @default(SIMULATED)
+  driverDeviceId      String?
+  originLat           Float
+  originLng           Float
+  destLat             Float
+  destLng             Float
+  etaMinutes          Int
+  startedAt           DateTime          @default(now())
+  arrivedAt           DateTime?
+
+  positions AmbulancePosition[]
+}
+model AmbulancePosition {
+  id         String        @id @default(uuid())
+  trip       AmbulanceTrip @relation(fields: [tripId], references: [id])
+  tripId     String
+  lat        Float
+  lng        Float
+  recordedAt DateTime      @default(now())
+
+  @@index([tripId, recordedAt])
+}
+
+enum VideoStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+}
+
+model VideoConsult {
+  id            String       @id @default(uuid())
+  appointment   Appointment  @relation(fields: [appointmentId], references: [id])
+  appointmentId String       @unique
+  roomId        String       @unique
+  status        VideoStatus  @default(SCHEDULED)
+  startedAt     DateTime?
+  endedAt       DateTime?
+}
+enum PlanType {
+  BASIC
+  CARE_PLUS
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+model CarePlanSubscription {
+  id               String             @id @default(uuid())
+  user             User               @relation(fields: [userId], references: [id])
+  userId           String             @unique
+  planType         PlanType
+  assignedDoctor   Doctor?            @relation(fields: [assignedDoctorId], references: [id])
+  assignedDoctorId String?
+  status           SubscriptionStatus @default(ACTIVE)
+  startedAt        DateTime           @default(now())
+}
+
+model VitalsLog {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  bp         String?
+  sugar      Int?
+  weightKg   Float?
+  recordedAt DateTime @default(now())
+}
+
+model Prescription {
+  id           String    @id @default(uuid())
+  user         User      @relation(fields: [userId], references: [id])
+  userId       String
+  doctor       Doctor    @relation(fields: [doctorId], references: [id])
+  doctorId     String
+  medicineName String
+  schedule     String
+  refillDueAt  DateTime
+  lastRefillAt DateTime?
+}
+
+enum SenderType {
+  USER
+  DOCTOR
+}
+
+model Message {
+  id        String     @id @default(uuid())
+  user      User       @relation("UserMessages", fields: [userId], references: [id])
+  userId    String
+  doctor    Doctor     @relation(fields: [doctorId], references: [id])
+  doctorId  String
+  sender    SenderType
+  text      String
+  createdAt DateTime   @default(now())
+
+  @@index([userId, doctorId, createdAt])
+}
